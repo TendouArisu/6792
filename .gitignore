@@ -1,0 +1,51 @@
+# === Python ================================================================
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# === Jupyter ===============================================================
+.ipynb_checkpoints/
+
+# === IDE / OS ==============================================================
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# === Debug outputs =========================================================
+debug_pipeline_sanity.jpg
+output.mp4
+
+# === Large raw datasets (re-download with provided scripts) ================
+# URFD raw images (~3.8 GB): python download_urfd.py --out-dir datasets/urfd
+datasets/urfd/
+
+# MCFD raw videos (~300 MB): download from Kaggle soumicksarker/multiple-cameras-fall-dataset
+datasets/mcfd/
+
+# Le2i original videos (obtain from Le2i dataset authors)
+data_Le2i/
+
+# === Large training CSVs (>100 MB, regenerate with 1 command) ==============
+# Regenerate command:
+#   python build_dataset.py --skip-extract --recursive --include-prefall
+#       --out-dir ../datasets --csv-name le2i_urfd_aug_prefall.csv
+datasets/le2i_urfd_aug_prefall.csv
+datasets/le2i_keypoints_aug_prefall.csv
+datasets/le2i_keypoints_aug.csv
+datasets/le2i_urfd_mcfd_aug_prefall.csv
+
+# === Old / unused model checkpoints ========================================
+models/fall_gru_30ep_gpu_bs128.pth
+models/test_fall_gru.pth
+
+# === Temp patch script =====================================================
+_patch_notebook.py
+
+# Claude Code internal settings
+.claude/
