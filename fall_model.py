@@ -352,22 +352,21 @@ def _base_video_id(vid: str) -> str:
     return vid
 
 
-def split_videos_by_id(csv_path, val_frac=0.2, seed=42):
+def split_videos_by_id(csv_path, val_frac=0.2, test_frac=0.0, seed=42):
     """
-    Returns (train_video_ids, val_video_ids).
+    Returns (train_video_ids, val_video_ids) or
+            (train_video_ids, val_video_ids, test_video_ids) when test_frac > 0.
 
-    Splits at the BASE-VIDEO level so that augmented versions of the same
-    video never end up in a different split from their source:
-      - Val  : only ORIGINAL (non-augmented) videos in the held-out set.
-      - Train: all original train videos PLUS all their augmented variants.
+    Splits at the BASE-VIDEO level:
+      - Test : original videos held out completely (no gradient, no threshold tuning).
+      - Val  : original videos used for early stopping / threshold search.
+      - Train: remaining originals + ALL their augmented variants.
 
-    This prevents data leakage while keeping val clean (real data only).
     Stratified by 'base video has any fall frame'.
     """
     df = pd.read_csv(csv_path, usecols=['video_id', 'label'])
     all_vids = df['video_id'].unique().tolist()
 
-    # Identify original vs augmented video_ids
     orig_vids = [v for v in all_vids if _base_video_id(v) == v]
 
     per_orig = (df[df['video_id'].isin(orig_vids)]
@@ -376,18 +375,20 @@ def split_videos_by_id(csv_path, val_frac=0.2, seed=42):
     per_orig.columns = ['video_id', 'has_fall']
 
     rng = np.random.default_rng(seed)
-    train_base, val_base = set(), set()
+    train_base, val_base, test_base = set(), set(), set()
+
     for has_fall, sub in per_orig.groupby('has_fall'):
         ids = sub['video_id'].tolist()
         rng.shuffle(ids)
-        n_val = max(1, int(round(len(ids) * val_frac)))
-        val_base.update(ids[:n_val])
-        train_base.update(ids[n_val:])
+        n_test = max(1, int(round(len(ids) * test_frac))) if test_frac > 0 else 0
+        n_val  = max(1, int(round(len(ids) * val_frac)))
+        test_base.update(ids[:n_test])
+        val_base.update(ids[n_test:n_test + n_val])
+        train_base.update(ids[n_test + n_val:])
 
-    # Val: original videos only (no augmented versions)
-    val_ids = sorted(val_base)
+    val_ids  = sorted(val_base)
+    test_ids = sorted(test_base)
 
-    # Train: original train videos + all their augmented variants
     train_ids = []
     for v in all_vids:
         base = _base_video_id(v)
@@ -395,4 +396,6 @@ def split_videos_by_id(csv_path, val_frac=0.2, seed=42):
             train_ids.append(v)
     train_ids = sorted(train_ids)
 
+    if test_frac > 0:
+        return train_ids, val_ids, test_ids
     return train_ids, val_ids

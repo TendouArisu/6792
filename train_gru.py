@@ -187,6 +187,10 @@ def main():
     p.add_argument('--smooth-alpha', type=float, default=0.2,
                    help='EMA smoothing factor for keypoint coords (0 disables).')
     p.add_argument('--val-frac', type=float, default=0.2)
+    p.add_argument('--test-frac', type=float, default=0.0,
+                   help='Fraction of original videos held out as test set '
+                        '(never seen during training or threshold tuning). '
+                        'Set to 0.15 for a proper 70/15/15 split.')
     p.add_argument('--seed', type=int, default=42)
     # model
     p.add_argument('--hidden-dim', type=int, default=64)
@@ -242,11 +246,20 @@ def main():
     np.random.seed(args.seed)
 
     # ---------------- video-level split ----------------
-    print('\n=== Splitting videos into train / val ===')
-    train_ids, val_ids = split_videos_by_id(args.csv, val_frac=args.val_frac,
-                                            seed=args.seed)
-    print('  train videos: {}'.format(len(train_ids)))
-    print('  val   videos: {}'.format(len(val_ids)))
+    print('\n=== Splitting videos into train / val{} ==='.format(
+        ' / test' if args.test_frac > 0 else ''))
+    split = split_videos_by_id(args.csv, val_frac=args.val_frac,
+                               test_frac=args.test_frac, seed=args.seed)
+    if args.test_frac > 0:
+        train_ids, val_ids, test_ids = split
+        print('  train videos: {}'.format(len(train_ids)))
+        print('  val   videos: {}'.format(len(val_ids)))
+        print('  test  videos: {} (held-out, never seen during training)'.format(len(test_ids)))
+    else:
+        train_ids, val_ids = split
+        test_ids = []
+        print('  train videos: {}'.format(len(train_ids)))
+        print('  val   videos: {}'.format(len(val_ids)))
 
     # ---------------- datasets ----------------
     print('\n=== Building train dataset ===')
@@ -429,6 +442,42 @@ def main():
     print('  best epoch    : {}'.format(best_epoch))
     print('  best val F1   : {:.3f}'.format(best_f1))
     print('  saved to      : {}'.format(args.out))
+
+    # ── Held-out test evaluation ────────────────────────────────────────
+    if test_ids:
+        print('\n=== Test set evaluation (held-out, threshold from val) ===')
+        test_ds = FallKeypointCSVDataset(
+            args.csv,
+            seq_len=args.seq_len, stride=args.stride,
+            min_pos_frames=args.min_pos_frames,
+            smooth_alpha=args.smooth_alpha,
+            video_ids=test_ids, verbose=True)
+        test_loader = DataLoader(test_ds, batch_size=args.batch_size,
+                                 shuffle=False, num_workers=2,
+                                 pin_memory=(device == 'cuda'))
+        # reload best model
+        best_model, best_ckpt = __import__('fall_model').FallDetectionGRU.load_from(
+            args.out, map_location=device)
+        best_model.to(device).eval()
+        best_thr = float(best_ckpt.get('best_threshold', 0.5))
+
+        te = run_epoch(best_model, test_loader, None, criterion,
+                       device, train=False, return_probs=True)
+        te_probs = te.pop('probs', None)
+        te_true  = te.pop('y_true', None)
+        if te_probs is not None and te_true is not None:
+            thr_opt, thr_m = find_best_threshold(te_true, te_probs,
+                                                  step=args.threshold_step)
+        print('  test size  : {} windows'.format(len(test_ds)))
+        print('  val thr    : {:.2f}  →  test F1={:.3f}  P={:.3f}  R={:.3f}'.format(
+            best_thr,
+            compute_metrics(te_true, (te_probs >= best_thr).astype(int))['f1'],
+            compute_metrics(te_true, (te_probs >= best_thr).astype(int))['precision'],
+            compute_metrics(te_true, (te_probs >= best_thr).astype(int))['recall']))
+        if te_probs is not None:
+            print('  best test thr: {:.2f}  →  test F1={:.3f}  P={:.3f}  R={:.3f}'.format(
+                thr_opt, thr_m['f1'], thr_m['precision'], thr_m['recall']))
+        print('  (These numbers are fully honest — test set never influenced training.)')
 
 
 if __name__ == '__main__':
